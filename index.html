@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lemon Price Tracker 🍋</title>
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #calendar { max-width: 800px; margin: 0 auto; }
+        #priceModal, #modalOverlay { display: none; }
+        #priceModal { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -30%);
+                      background: white; padding: 20px; border: 2px solid #333;
+                      box-shadow: 0px 0px 10px rgba(0,0,0,0.5); z-index: 1001; }
+        #modalOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                        background: rgba(0,0,0,0.5); z-index: 1000; }
+        #chartContainer { max-width: 800px; margin: 50px auto; }
+        #filterContainer { text-align: center; margin: 20px; }
+    </style>
+</head>
+<body>
+
+<h1 style="text-align:center;">Lemon Price Tracker 🍋</h1>
+
+<div id="calendar"></div>
+
+<div id="filterContainer">
+    <label for="viewSelect">View by:</label>
+    <select id="viewSelect">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+    </select>
+</div>
+
+<div id="modalOverlay"></div>
+<div id="priceModal">
+    <h3>Enter Lemon Price</h3>
+    <input type="number" id="priceInput" placeholder="Enter price" />
+    <br><br>
+    <button id="saveButton">Save</button>
+    <button onclick="closeModal()">Cancel</button>
+</div>
+
+<div id="chartContainer">
+    <canvas id="priceChart"></canvas>
+</div>
+
+<script>
+    let selectedDate = null;
+    let priceData = {};
+
+    function openModal(dateStr) {
+        selectedDate = dateStr;
+        document.getElementById('modalOverlay').style.display = 'block';
+        document.getElementById('priceModal').style.display = 'block';
+        document.getElementById('priceInput').value = priceData[selectedDate] || '';
+    }
+
+    function closeModal() {
+        document.getElementById('modalOverlay').style.display = 'none';
+        document.getElementById('priceModal').style.display = 'none';
+    }
+
+    function savePrice() {
+        const price = document.getElementById('priceInput').value;
+        if (price === '') {
+            alert('Please enter a price.');
+            return;
+        }
+
+        axios.post('/save_price', {
+            date: selectedDate,
+            price: parseFloat(price)
+        }).then(response => {
+            priceData[selectedDate] = parseFloat(price);
+            updateChart();
+            closeModal();
+        }).catch(error => {
+            console.error('Error saving price:', error);
+        });
+    }
+
+    function groupData(view) {
+        let grouped = {};
+
+        for (let date in priceData) {
+            let d = new Date(date);
+
+            if (view === 'weekly') {
+                let year = d.getFullYear();
+                let week = Math.ceil((((d - new Date(year,0,1)) / 86400000) + new Date(year,0,1).getDay()+1)/7);
+                key = `${year}-W${week}`;
+            } else if (view === 'monthly') {
+                let key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0');
+            } else if (view === 'yearly') {
+                key = d.getFullYear();
+            } else {
+                key = date;
+            }
+
+            if (!grouped[key]) {
+                grouped[key] = [];
+            }
+            grouped[key].push(priceData[date]);
+        }
+
+        // Average prices
+        let finalData = {};
+        for (let key in grouped) {
+            let sum = grouped[key].reduce((a, b) => a + b, 0);
+            finalData[key] = sum / grouped[key].length;
+        }
+        return finalData;
+    }
+
+    function updateChart() {
+        const view = document.getElementById('viewSelect').value;
+        const groupedData = groupData(view);
+
+        const labels = Object.keys(groupedData).sort();
+        const prices = labels.map(label => groupedData[label]);
+
+        if (window.priceChart) {
+            window.priceChart.destroy();
+        }
+
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        window.priceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Lemon Price (₹)',
+                    data: prices,
+                    borderColor: 'rgba(255, 206, 86, 1)',
+                    backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                scales: {
+                    x: { title: { display: true, text: view.charAt(0).toUpperCase() + view.slice(1) }},
+                    y: { title: { display: true, text: 'Price (₹)' }}
+                }
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        axios.get('/get_prices')
+            .then(response => {
+                priceData = response.data || {};
+                updateChart();
+            });
+
+        var calendarEl = document.getElementById('calendar');
+        var calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'dayGridMonth',
+            dateClick: function (info) {
+                openModal(info.dateStr);
+            }
+        });
+        calendar.render();
+
+        document.getElementById('saveButton').addEventListener('click', savePrice);
+        document.getElementById('viewSelect').addEventListener('change', updateChart);
+    });
+</script>
+
+</body>
+</html>
